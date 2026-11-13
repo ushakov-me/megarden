@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d1a12">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>MeGarden</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0d1a12;color:#d8e8dc;font-family:Verdana,sans-serif;font-size:0.72em}
+#wrap{max-width:360px;margin:0 auto;padding:12px;min-height:100vh;display:flex;flex-direction:column}
+h3{color:#6fcf8f;text-align:center;font-size:1.5em}
+h4{color:#6fcf8f;margin:18px 0 6px}
+table{width:100%}
+th{text-align:left;font-weight:normal;color:#9fbfa8;padding:3px 2px}
+td{text-align:right;padding:3px 2px}
+.conn{text-align:center;font-size:0.9em;color:#9fbfa8;margin:4px 0}
+button{display:block;width:100%;margin:8px 0;padding:6px 10px;border:none;border-radius:3px;background:#6fcf8f;color:#0d1a12;font-size:1em;cursor:pointer}
+button.warn{background:#e8734a}
+input{width:100%;border:1px solid #6fcf8f;border-radius:3px;background:#1b3325;color:#e6f2e9;padding:6px;text-align:center;margin:4px 0}
+#log{background:#0a140e;color:#b7e3c4;border-radius:3px;padding:6px;font-size:0.9em;word-break:break-all}
+#log div{margin:2px 0}
+.net{font-size:0.85em;text-align:center;color:#9fbfa8;margin-top:8px}
+.frow{display:flex;align-items:center;margin:4px 0}
+.frow span{flex:1;text-align:left;color:#9fbfa8}
+.frow input{flex:1;margin:0}
+</style>
+</head>
+<body>
+<div id="wrap">
+<h3><svg width="1em" height="1em" viewBox="0 0 24 24" style="fill:#6fcf8f;vertical-align:-0.12em"><path d="M17 8C8 10 5.9 16.17 3.82 21.34l1.89.66.95-2.3c.48.17.98.3 1.34.3C19 20 22 3 22 3c-1 2-8 2.25-13 3.25S2 11.5 2 13.5s1.75 3.75 1.75 3.75C7 8 17 8 17 8z"/></svg> MeGarden</h3>
+<div id="conn" class="conn">соединение…</div>
+<table id="stat"></table>
+<div id="ctrl"></div>
+<div id="mqttbox" style="display:none">
+<input id="muser" placeholder="MQTT пользователь" autocapitalize="off" autocomplete="username">
+<input id="mpass" type="password" placeholder="MQTT пароль" autocomplete="current-password">
+<button id="mbtn">Подключиться</button>
+</div>
+<div id="pages">
+<button id="btnset" onclick="toggleSet()">Настройки</button>
+<button id="btnsys" onclick="location.href='/mg3sys'">Параметры Tasmota</button>
+<button id="btnrst" class="warn" onclick="doRestart()">Перезагрузка</button>
+</div>
+<div id="setform" style="display:none">
+<h4 style="margin-top:8px">Настройки полива</h4>
+<div class="frow"><span>Свет вкл (ЧЧ:ММ)</span><input id="f_on" placeholder="07:00"></div>
+<div class="frow"><span>Свет выкл (ЧЧ:ММ)</span><input id="f_off" placeholder="20:00"></div>
+<div class="frow"><span>Циклов в сутки</span><input id="f_cyc" inputmode="numeric"></div>
+<div class="frow"><span>Длительность, с</span><input id="f_dur" inputmode="numeric"></div>
+<div class="frow"><span>Бюджет, с</span><input id="f_bud" inputmode="numeric"></div>
+<button onclick="saveSet()">Сохранить</button>
+</div>
+<h4>Журнал</h4>
+<div id="log"></div>
+<div class="net" id="netinfo"></div>
+</div>
+<script>
+// MeGarden PWA (веха M8): «Дома» = прямые /cm с платы, «Удалённо» = MQTT по WSS.
+// Мини-MQTT 3.1.1: QoS0, keepalive 60 с, без внешних библиотек (CDN запрещён ТЗ).
+var T={base:'megarden3',broker:'wss://m9.wqtt.ru:23507'};
+var st={Mode:'Auto',Light:0,Water:'idle',Left:0,Done:0,Cycles:0,Budget:0,Spent:0,Win:'',Next:'',Time:'',Rssi:'',Sig:'',Mq:''};
+var mode=null;                 // 'local' | 'mqtt'
+var ws=null,wsOk=false,pid=1,logArr=[],pathIdx=0,kaT=null,stsT=null,logT=null;
+
+function el(id){return document.getElementById(id);}
+function log(s){var d=new Date();
+  if('['===s.charAt(0)){logArr.unshift(s);}                 // запись устройства: метка [MM-DD HH:MM:SS] уже внутри
+  else{logArr.unshift(d.toTimeString().slice(0,8)+' '+s);}
+  if(logArr.length>20)logArr.length=20;
+  el('log').innerHTML=logArr.map(function(x){return '<div>'+x+'</div>';}).join('');}
+function applyLog(j){                                       // {"MgLog":[...]} - история журнала устройства, новые первыми
+  if(!j||!j.MgLog)return false;
+  for(var i=j.MgLog.length-1;i>=0;i--){
+    var s=j.MgLog[i];
+    if(logArr.indexOf(s)<0){logArr.unshift(s);}             // дедуп по полной строке (30-с опрос шлёт то же)
+  }
+  if(logArr.length>20)logArr.length=20;
+  el('log').innerHTML=logArr.map(function(x){return '<div>'+x+'</div>';}).join('');
+  return true;
+}
+
+function render(){
+  var rows=[['Время',st.Time?st.Time.slice(11):'—'],
+    ['Режим',String(st.Mode).toUpperCase()],['Свет',st.Light?'ВКЛ':'выкл'],['Полив',st.Water],
+    ['Бюджет',st.Spent+' из '+st.Budget+' с (осталось '+st.Left+')'],
+    ['Циклов сегодня',st.Done+' из '+st.Cycles],
+    ['Окно света',st.Win],['Следующее',st.Next],
+    ['Wi-Fi',st.Sig!==''?('ок, '+st.Sig+' dBm ('+st.Rssi+'%)'):'—'],
+    ['MQTT устройства',st.Mq!==''?st.Mq:'—']];
+  el('stat').innerHTML=rows.map(function(r){return '<tr><th>'+r[0]+'</th><td>'+r[1]+'</td></tr>';}).join('');
+  var manual=String(st.Mode).toLowerCase()!=='auto',c='';
+  c+=manual?"<button class='warn' onclick=\"cmd('MgMode','0')\">&#8594; AUTO mode</button>"
+           :"<button onclick=\"cmd('MgMode','1')\">&#8594; MANUAL mode</button>";
+  if(manual){
+    c+="<button onclick=\"cmd('MgLight','"+(st.Light?0:1)+"')\">Свет "+(st.Light?'ВЫКЛ':'ВКЛ')+"</button>";
+    if(st.Water==='idle')c+="<button onclick=\"cmd('MgWater','1')\">Полив 1 цикл</button>";
+  }
+  if(st.Water!=='idle')c+="<button class='warn' onclick=\"cmd('MgWater','0')\">Стоп полива</button>";
+  el('ctrl').innerHTML=c;
+}
+function applyMg(j){if(!j||!j.MG3)return false;var m=j.MG3;for(var k in m)st[k]=m[k];render();return true;}
+function applySts(j){                        // Status 11: время устройства, Wi-Fi, MQTT
+  if(!j||!j.StatusSTS)return false;
+  var s=j.StatusSTS;
+  if(s.Time){st.Time=s.Time;}
+  if(s.Wifi&&s.Wifi.Signal!==undefined){st.Sig=s.Wifi.Signal;st.Rssi=s.Wifi.RSSI;}
+  st.Mq=(s.MqttCount!==undefined&&s.MqttCount>0)?'ок':'нет';
+  render();
+  return true;
+}
+
+/* ---------- режим «Дома»: прямые /cm ---------- */
+function startLocal(){
+  mode='local';el('conn').textContent='режим «Дома»';
+  pollLocal();setInterval(pollLocal,15000);
+  pollSts();setInterval(pollSts,30000);
+  pollLog();setInterval(pollLog,30000);
+}
+function hideSysBtn(){                                // страницы устройства доступны только из ЛС
+  if('mqtt'===mode){el('btnsys').style.display='none';}
+}
+function pollSts(){                                   // время/Wi-Fi/MQTT устройства (Status 11)
+  if(mode==='local'){cmLocal('Status 11').then(applySts);}
+  else if(wsOk){pub('cmnd/'+T.base+'/Status','11');}
+}
+function pollLog(){                                   // журнал устройства: история при старте + каждые 30 с
+  if(mode==='local'){cmLocal('MgLog 10').then(applyLog);}
+  else if(wsOk){pub('cmnd/'+T.base+'/MgLog','10');}
+}
+function pollLocal(){
+  fetch('/cm?cmnd=MgStatus',{credentials:'same-origin'})
+    .then(function(r){if(!r.ok)throw 0;return r.json();})
+    .then(function(j){if(!applyMg(j))throw 0;el('conn').textContent='режим «Дома» · онлайн';})
+    .catch(function(){el('conn').textContent='режим «Дома» · нет связи';});
+}
+function cmLocal(c){return fetch('/cm?cmnd='+encodeURIComponent(c),{credentials:'same-origin'})
+  .then(function(r){return r.json();}).catch(function(){return{};});}
+
+/* ---------- мини-MQTT по WebSocket ---------- */
+function rl(n){var a=[];do{var d=n&127;n>>=7;if(n)d|=128;a.push(d);}while(n);return a;}
+function mstr(s){return [(s.length>>8)&255,s.length&255].concat(Array.prototype.map.call(s,function(ch){return ch.charCodeAt(0)&255;}));}
+function pkt(t,body){return new Uint8Array([t].concat(rl(body.length)).concat(body));}
+function sub(t){ws.send(pkt(0x82,[0,pid++].concat(mstr(t),[0])));}
+function pub(t,p){ws.send(pkt(0x30,mstr(t).concat(                       // payload БЕЗ префикса длины (MQTT-грабля M8)
+  Array.prototype.map.call(p,function(ch){return ch.charCodeAt(0)&255;}))));}
+
+function startMqtt(){
+  mode='mqtt';el('conn').textContent='режим «Удалённо»';hideSysBtn();
+  el('mqttbox').style.display='block';
+  el('muser').value=localStorage.getItem('mg3user')||'';
+  el('mpass').value=localStorage.getItem('mg3pass')||'';
+  el('mbtn').onclick=function(){localStorage.setItem('mg3user',el('muser').value);
+    localStorage.setItem('mg3pass',el('mpass').value);pathIdx=0;openWs();};
+  if(el('muser').value&&el('mpass').value)openWs();else log('введите учётные данные MQTT');
+}
+function openWs(){
+  wsOk=false;
+  var path=pathIdx===0?'/mqtt':'/';                       // путь WSS выясняется вживую: /mqtt, потом /
+  ws=new WebSocket(T.broker+path,'mqtt');ws.binaryType='arraybuffer';   // 'mqtt' обязательно: без подпротокола wqtt принимает WS, но игнорирует кадры
+  log('подключение '+T.broker+path);
+  var to=setTimeout(function(){if(!wsOk){log('таймаут рукопожатия');try{ws.close();}catch(e){}}},8000);
+  ws.onopen=function(){
+    var cid='mg3app'+Math.random().toString(16).slice(2,8);
+    var flags=0x02;                                        // clean session
+    if(el('muser').value)flags|=0x80;
+    if(el('mpass').value)flags|=0x40;
+    var body=mstr('MQTT').concat([4,flags,0,60],mstr(cid));
+    if(flags&0x80)body=body.concat(mstr(el('muser').value));
+    if(flags&0x40)body=body.concat(mstr(el('mpass').value));
+    ws.send(pkt(0x10,body));                               // CONNECT
+  };
+  ws.onmessage=function(e){
+    var b=new Uint8Array(e.data),t=b[0]>>4;
+    if(t===2){                                             // CONNACK
+      clearTimeout(to);
+      if(b[3]!==0){log('MQTT: CONNACK отказ, код '+b[3]);try{ws.close();}catch(x){}return;}
+      wsOk=true;el('conn').textContent='режим «Удалённо» · MQTT онлайн';
+      log('MQTT подключён');
+      kaT=setInterval(function(){try{ws.send(pkt(0xC0,[]));}catch(e){}},30000);   // PINGREQ keepalive
+      sub('stat/'+T.base+'/#');sub('tele/'+T.base+'/SENSOR');   // '#': короткие ответы в RESULT, длинные статусы - в STATUS11
+      sub('tele/'+T.base+'/LWT');sub('tele/'+T.base+'/MG3');
+      pub('cmnd/'+T.base+'/MgStatus','');
+      pollSts();
+      if(!stsT){stsT=setInterval(pollSts,30000);}     // время/Wi-Fi/MQTT устройства
+      pollLog();
+      if(!logT){logT=setInterval(pollLog,30000);}     // журнал устройства (история + дельты)
+    } else if(t===3){                                      // PUBLISH (QoS0)
+      var i=1,mul=1,val=b[1]&127;
+      while(b[i]&128){i++;val+=(b[i]&127)*mul;mul*=128;}   // remaining length
+      var hdr=i+1,tl=(b[hdr]<<8)|b[hdr+1],topic='';
+      for(var j=0;j<tl;j++)topic+=String.fromCharCode(b[hdr+2+j]);
+      var pl='';for(var k=hdr+2+tl;k<b.length;k++)pl+=String.fromCharCode(b[k]);
+      onMsg(topic,pl);
+    }
+  };
+  ws.onclose=function(){
+    clearTimeout(to);
+    if(kaT){clearInterval(kaT);kaT=null;}
+    if(wsOk){
+      el('conn').textContent='режим «Удалённо» · связь потеряна';
+      log('MQTT отключён, переподключение…');setTimeout(openWs,3000);
+    } else if(pathIdx<1){pathIdx++;openWs();               // попробовать второй путь
+    } else {log('WSS недоступен, повтор через 10 с');setTimeout(function(){pathIdx=0;openWs();},10000);}
+  };
+}
+function onMsg(topic,pl){
+  if(topic==='tele/'+T.base+'/LWT'){log('LWT: '+pl);return;}
+  if(topic==='tele/'+T.base+'/MG3'){setTimeout(pollLog,800);return;}   // live-событие: подтянем запись из MgLog (с меткой устройства, без дублей)
+  var j=null;try{j=JSON.parse(pl);}catch(e){}
+  if(topic==='tele/'+T.base+'/STATE'&&j){                  // периодический STATE: те же поля без обёртки
+    st.Time=j.Time||st.Time;
+    if(j.Wifi&&j.Wifi.Signal!==undefined){st.Sig=j.Wifi.Signal;st.Rssi=j.Wifi.RSSI;}
+    render();return;
+  }
+  if(!applyMg(j)){if(!applySts(j)){applyLog(j);}}         // RESULT: MgStatus/SENSOR | STATUS11 | MgLog
+}
+
+/* ---------- команды ---------- */
+function cmd(name,arg){
+  var c=name+(arg!==''?' '+arg:'');
+  if(mode==='local'){cmLocal(c).then(applyMg);setTimeout(pollLocal,700);setTimeout(pollLog,900);}
+  else if(wsOk){pub('cmnd/'+T.base+'/'+name,arg);pub('cmnd/'+T.base+'/MgStatus','');setTimeout(pollLog,900);}
+  else{log('нет связи: '+c);}
+}
+
+/* ---------- настройки / страницы / перезагрузка ---------- */
+function toggleSet(){
+  var f=el('setform');
+  if('none'===f.style.display){fillSet();f.style.display='block';}
+  else{f.style.display='none';}
+}
+function fillSet(){                                   // из MgStatus: Win/Cycle/Cycles/Budget
+  var w=String(st.Win||'').split('-');
+  el('f_on').value=w[0]||'';el('f_off').value=w[1]||'';
+  el('f_cyc').value=st.Cycles||0;el('f_dur').value=st.Cycle||0;el('f_bud').value=st.Budget||0;
+}
+function saveSet(){
+  var on=el('f_on').value.trim(),off=el('f_off').value.trim();
+  var t=/^([01]?\d|2[0-3]):[0-5]\d$/;
+  if(!t.test(on)||!t.test(off)){log('ошибка: время должно быть ЧЧ:ММ');return;}
+  var cyc=parseInt(el('f_cyc').value,10),dur=parseInt(el('f_dur').value,10),bud=parseInt(el('f_bud').value,10);
+  if(isNaN(cyc)||isNaN(dur)||isNaN(bud)||cyc<0||dur<0||bud<0){log('ошибка: числа 0 и больше');return;}
+  cmd('MgLightOn',on);cmd('MgLightOff',off);
+  cmd('MgCycles',String(cyc));cmd('MgCycle',String(dur));cmd('MgBudget',String(bud));
+  log('настройки отправлены: '+on+'-'+off+', циклов '+cyc+', '+dur+' с, бюджет '+bud+' с');
+  el('setform').style.display='none';
+}
+function doRestart(){
+  if(!confirm('Перезагрузить устройство?')){return;}
+  log('перезагрузка устройства…');
+  el('conn').textContent=(mode==='local'?'режим «Дома»':'режим «Удалённо»')+' · перезагружается…';
+  if(mode==='local'){cmLocal('Restart 1');setTimeout(pollLocal,25000);}
+  else if(wsOk){pub('cmnd/'+T.base+'/Restart','1');setTimeout(function(){if(!wsOk){pathIdx=0;openWs();}},20000);}
+}
+
+/* ---------- запуск: автоопределение режима ---------- */
+render();
+var q=new URLSearchParams(location.search).get('net');
+if(q==='mqtt')startMqtt();
+else if(q==='local')startLocal();
+else fetch('/cm?cmnd=MgStatus',{credentials:'same-origin'})
+  .then(function(r){if(!r.ok)throw 0;return r.json();})
+  .then(function(j){if(!applyMg(j))throw 0;startLocal();})
+  .catch(startMqtt);
+</script>
+<script>if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js');}</script>
+</body>
+</html>
