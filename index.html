@@ -56,6 +56,12 @@ input{width:100%;border:1px solid #6fcf8f;border-radius:3px;background:#1b3325;c
 <div class="frow"><span>Длительность, с</span><input id="f_dur" inputmode="numeric"></div>
 <div class="frow"><span>Бюджет, с</span><input id="f_bud" inputmode="numeric"></div>
 <button onclick="saveSet()">Сохранить</button>
+<div id="mqttsec" style="display:none">
+<h4 style="margin-top:8px">MQTT-подключение</h4>
+<div class="frow"><span>Логин MQTT</span><input id="f_muser" autocapitalize="off" autocomplete="off"></div>
+<div class="frow"><span>Пароль MQTT</span><input id="f_mpass" type="password" autocomplete="off"></div>
+<button onclick="mqttReconnect()">Переподключиться</button>
+</div>
 </div>
 <h4>Журнал</h4>
 <div id="log"></div>
@@ -126,6 +132,9 @@ function startLocal(){
 function hideSysBtn(){                                // страницы устройства доступны только из ЛС
   if('mqtt'===mode){el('btnsys').style.display='none';}
 }
+function setMqttBox(){                                // поля учёток на главном - только пока нет подключения
+  el('mqttbox').style.display=('mqtt'===mode&&!wsOk)?'block':'none';
+}
 function pollSts(){                                   // время/Wi-Fi/MQTT устройства (Status 11)
   if(mode==='local'){cmLocal('Status 11').then(applySts);}
   else if(wsOk){pub('cmnd/'+T.base+'/Status','11');}
@@ -153,11 +162,11 @@ function pub(t,p){ws.send(pkt(0x30,mstr(t).concat(                       // payl
 
 function startMqtt(){
   mode='mqtt';el('conn').textContent='режим «Удалённо»';hideSysBtn();
-  el('mqttbox').style.display='block';
   el('muser').value=localStorage.getItem('mg3user')||'';
   el('mpass').value=localStorage.getItem('mg3pass')||'';
   el('mbtn').onclick=function(){localStorage.setItem('mg3user',el('muser').value);
     localStorage.setItem('mg3pass',el('mpass').value);pathIdx=0;openWs();};
+  setMqttBox();                                          // поля на главном - только без подключения
   if(el('muser').value&&el('mpass').value)openWs();else log('введите учётные данные MQTT');
 }
 function openWs(){
@@ -182,7 +191,7 @@ function openWs(){
       clearTimeout(to);
       if(b[3]!==0){log('MQTT: CONNACK отказ, код '+b[3]);try{ws.close();}catch(x){}return;}
       wsOk=true;el('conn').textContent='режим «Удалённо» · MQTT онлайн';
-      log('MQTT подключён');
+      log('MQTT подключён');setMqttBox();
       kaT=setInterval(function(){try{ws.send(pkt(0xC0,[]));}catch(e){}},30000);   // PINGREQ keepalive
       sub('stat/'+T.base+'/#');sub('tele/'+T.base+'/SENSOR');   // '#': короткие ответы в RESULT, длинные статусы - в STATUS11
       sub('tele/'+T.base+'/LWT');sub('tele/'+T.base+'/MG3');
@@ -203,7 +212,9 @@ function openWs(){
   ws.onclose=function(){
     clearTimeout(to);
     if(kaT){clearInterval(kaT);kaT=null;}
-    if(wsOk){
+    var wasOk=wsOk;
+    wsOk=false;setMqttBox();                               // нет связи - поля учёток возвращаются на главный
+    if(wasOk){                                             // связь рвалась - авто-переподключение
       el('conn').textContent='режим «Удалённо» · связь потеряна';
       log('MQTT отключён, переподключение…');setTimeout(openWs,3000);
     } else if(pathIdx<1){pathIdx++;openWs();               // попробовать второй путь
@@ -233,13 +244,30 @@ function cmd(name,arg){
 /* ---------- настройки / страницы / перезагрузка ---------- */
 function toggleSet(){
   var f=el('setform');
-  if('none'===f.style.display){fillSet();f.style.display='block';}
+  if('none'===f.style.display){
+    fillSet();
+    el('mqttsec').style.display=('mqtt'===mode)?'block':'none';   // секция MQTT - только в «Удалённо»
+    f.style.display='block';
+  }
   else{f.style.display='none';}
+}
+function mqttReconnect(){                             // учётки из настроек -> подключение
+  el('muser').value=el('f_muser').value;
+  el('mpass').value=el('f_mpass').value;
+  localStorage.setItem('mg3user',el('muser').value);
+  localStorage.setItem('mg3pass',el('mpass').value);
+  pathIdx=0;
+  log('переподключение с новыми учётками…');
+  if(ws){try{ws.close();}catch(e){setTimeout(openWs,500);}}   // onclose сам переподключится через 3 с
+  else{openWs();}
+  el('setform').style.display='none';
 }
 function fillSet(){                                   // из MgStatus: Win/Cycle/Cycles/Budget
   var w=String(st.Win||'').split('-');
   el('f_on').value=w[0]||'';el('f_off').value=w[1]||'';
   el('f_cyc').value=st.Cycles||0;el('f_dur').value=st.Cycle||0;el('f_bud').value=st.Budget||0;
+  el('f_muser').value=localStorage.getItem('mg3user')||'';   // учётки MQTT - в секцию настроек
+  el('f_mpass').value=localStorage.getItem('mg3pass')||'';
 }
 function saveSet(){
   var on=el('f_on').value.trim(),off=el('f_off').value.trim();
