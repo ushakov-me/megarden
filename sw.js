@@ -1,6 +1,6 @@
 // MeGarden PWA service worker: офлайн-оболочка (cache-first).
 // Версию поднимать при каждом изменении index.html (иначе клиенты держат старую).
-var CACHE='MG3_SW_V1';
+var CACHE='MG3_SW_V2';
 var SHELL=['./','index.html','manifest.webmanifest','icon-192.png','icon-512.png','apple-touch-icon.png'];
 self.addEventListener('install',function(e){
   e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(SHELL);})  .then(function(){return self.skipWaiting();}));

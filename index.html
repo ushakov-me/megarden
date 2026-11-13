@@ -96,8 +96,8 @@ function render(){
     ['MQTT устройства',st.Mq!==''?st.Mq:'—']];
   el('stat').innerHTML=rows.map(function(r){return '<tr><th>'+r[0]+'</th><td>'+r[1]+'</td></tr>';}).join('');
   var manual=String(st.Mode).toLowerCase()!=='auto',c='';
-  c+=manual?"<button class='warn' onclick=\"cmd('MgMode','0')\">&#8594; AUTO mode</button>"
-           :"<button onclick=\"cmd('MgMode','1')\">&#8594; MANUAL mode</button>";
+  c+=manual?"<button class='warn' onclick=\"cmd('MgMode','0')\">&#8658; AUTO mode</button>"
+           :"<button onclick=\"cmd('MgMode','1')\">&#8658; MANUAL mode</button>";
   if(manual){
     c+="<button onclick=\"cmd('MgLight','"+(st.Light?0:1)+"')\">Свет "+(st.Light?'ВЫКЛ':'ВКЛ')+"</button>";
     if(st.Water==='idle')c+="<button onclick=\"cmd('MgWater','1')\">Полив 1 цикл</button>";
