@@ -143,6 +143,14 @@ function pollLog(){                                   // журнал устро
   if(mode==='local'){cmLocal('MgLog 10').then(applyLog);}
   else if(wsOk){pub('cmnd/'+T.base+'/MgLog','10');}
 }
+function pollStatus(){                                // свежий MgStatus текущим каналом
+  if(mode==='local'){cmLocal('MgStatus').then(applyMg);}
+  else if(wsOk){pub('cmnd/'+T.base+'/MgStatus','');}
+}
+function fastTick(){                                  // полив идёт - состояние меняется каждые ~0,5 с:
+  if(st.Water&&st.Water!=='idle'){pollStatus();}      // обычные опросы (15/30/120 с) за циклом не успевают
+}
+setInterval(fastTick,3000);
 function pollLocal(){
   fetch('/cm?cmnd=MgStatus',{credentials:'same-origin'})
     .then(function(r){if(!r.ok)throw 0;return r.json();})
@@ -223,7 +231,7 @@ function openWs(){
 }
 function onMsg(topic,pl){
   if(topic==='tele/'+T.base+'/LWT'){log('LWT: '+pl);return;}
-  if(topic==='tele/'+T.base+'/MG3'){setTimeout(pollLog,800);return;}   // live-событие: подтянем запись из MgLog (с меткой устройства, без дублей)
+  if(topic==='tele/'+T.base+'/MG3'){setTimeout(function(){pollLog();pollStatus();},800);return;}   // live-событие: журнал + свежий статус (start/stop полива меняют состояние)
   var j=null;try{j=JSON.parse(pl);}catch(e){}
   if(topic==='tele/'+T.base+'/STATE'&&j){                  // периодический STATE: те же поля без обёртки
     st.Time=j.Time||st.Time;
@@ -237,7 +245,7 @@ function onMsg(topic,pl){
 function cmd(name,arg){
   var c=name+(arg!==''?' '+arg:'');
   if(mode==='local'){cmLocal(c).then(applyMg);setTimeout(pollLocal,700);setTimeout(pollLog,900);}
-  else if(wsOk){pub('cmnd/'+T.base+'/'+name,arg);pub('cmnd/'+T.base+'/MgStatus','');setTimeout(pollLog,900);}
+  else if(wsOk){pub('cmnd/'+T.base+'/'+name,arg);pollStatus();setTimeout(pollLog,900);}
   else{log('нет связи: '+c);}
 }
 
