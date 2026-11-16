@@ -92,6 +92,13 @@ function applyLog(j){                                       // {"MgLog":[...]} -
   return true;
 }
 
+function mapRtc(h,t){                              // здоровье DS3231 (поля Rtc/RtcT из MgStatus)
+  if(h===undefined)return '—';
+  if(h==='ok')return 'ок'+(t!==undefined?', '+Math.round(t)+'°C':'');
+  if(h==='osf')return 'OSF — остановка осциллятора, батарейка?';
+  if(h==='err')return 'нет связи I2C';
+  return 'не найден';
+}
 function render(){
   var rows=[['Время',st.Time?st.Time.slice(11):'—'],
     ['Режим',String(st.Mode).toUpperCase()],['Свет',st.Light?'ВКЛ':'выкл'],['Полив',st.Water],
@@ -99,7 +106,8 @@ function render(){
     ['Циклов сегодня',st.Done+' из '+st.Cycles],
     ['Окно света',st.Win],['Следующее',st.Next],
     ['Wi-Fi',st.Sig!==''?('ок, '+st.Sig+' dBm ('+st.Rssi+'%)'):'—'],
-    ['MQTT устройства',st.Mq!==''?st.Mq:'—']];
+    ['MQTT устройства',st.Mq!==''?st.Mq:'—'],
+    ['DS3231',mapRtc(st.Rtc,st.RtcT)]];
   el('stat').innerHTML=rows.map(function(r){return '<tr><th>'+r[0]+'</th><td>'+r[1]+'</td></tr>';}).join('');
   var manual=String(st.Mode).toLowerCase()!=='auto',c='';
   c+=manual?"<button class='warn' onclick=\"cmd('MgMode','0')\">&#8658; AUTO mode</button>"
