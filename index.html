@@ -50,9 +50,9 @@ input{width:100%;border:1px solid #6fcf8f;border-radius:3px;background:#1b3325;c
 </div>
 <div id="setform" style="display:none">
 <h4 style="margin-top:8px">Настройки полива</h4>
-<div class="frow"><span>Свет вкл будни (ЧЧ:ММ)</span><input id="f_on" placeholder="07:00"></div>
-<div class="frow"><span>Свет вкл вых (ЧЧ:ММ)</span><input id="f_onwe" placeholder="07:00"></div>
-<div class="frow"><span>Свет выкл (ЧЧ:ММ)</span><input id="f_off" placeholder="20:00"></div>
+<div class="frow"><span>Свет вкл будни (ЧЧ:ММ)</span><input id="f_on" placeholder="07:00" inputmode="numeric" maxlength="5" oninput="maskT(this)" onblur="padT(this)"></div>
+<div class="frow"><span>Свет вкл вых (ЧЧ:ММ)</span><input id="f_onwe" placeholder="07:00" inputmode="numeric" maxlength="5" oninput="maskT(this)" onblur="padT(this)"></div>
+<div class="frow"><span>Свет выкл (ЧЧ:ММ)</span><input id="f_off" placeholder="20:00" inputmode="numeric" maxlength="5" oninput="maskT(this)" onblur="padT(this)"></div>
 <div class="frow"><span>Циклов в сутки</span><input id="f_cyc" inputmode="numeric"></div>
 <div class="frow"><span>Длительность, с</span><input id="f_dur" inputmode="numeric"></div>
 <div class="frow"><span>Бюджет, с</span><input id="f_bud" inputmode="numeric"></div>
@@ -278,6 +278,21 @@ function mqttReconnect(){                             // учётки из на�
   if(ws){try{ws.close();}catch(e){setTimeout(openWs,500);}}   // onclose сам переподключится через 3 с
   else{openWs();}
   el('setform').style.display='none';
+}
+function maskT(i){                                    // маска времени: только цифры -> "Ч:ММ" на лету
+  var d=i.value.replace(/\D/g,'').slice(0,4),h=d.slice(0,2),v=d;
+  if(d.length>2){
+    if(parseInt(h,10)>23)h=d[0];                      // "930" -> часы "9" (двузначные "93" невалидны)
+    v=h+':'+d.substr(h.length,2);
+  }else if(d.length===2&&parseInt(d,10)>23){v=d[0]+':'+d[1];}   // "25" -> "2:5"
+  if(v!==i.value)i.value=v;
+}
+function padT(i){                                     // уход из поля: дополнить до "ЧЧ:ММ"
+  var m=/^(\d{1,2}):?(\d{0,2})$/.exec(i.value);
+  if(!m)return;
+  var h=parseInt(m[1],10),n=m[2]?parseInt(m[2],10):0;
+  if(h>23||n>59)return;
+  i.value=('0'+h).slice(-2)+':'+('0'+n).slice(-2);
 }
 function fillSet(){                                   // из MgStatus: Win/WinWe/Cycle/Cycles/Budget
   var w=String(st.Win||'').split('-');
