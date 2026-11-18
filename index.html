@@ -50,7 +50,8 @@ input{width:100%;border:1px solid #6fcf8f;border-radius:3px;background:#1b3325;c
 </div>
 <div id="setform" style="display:none">
 <h4 style="margin-top:8px">Настройки полива</h4>
-<div class="frow"><span>Свет вкл (ЧЧ:ММ)</span><input id="f_on" placeholder="07:00"></div>
+<div class="frow"><span>Свет вкл будни (ЧЧ:ММ)</span><input id="f_on" placeholder="07:00"></div>
+<div class="frow"><span>Свет вкл вых (ЧЧ:ММ)</span><input id="f_onwe" placeholder="07:00"></div>
 <div class="frow"><span>Свет выкл (ЧЧ:ММ)</span><input id="f_off" placeholder="20:00"></div>
 <div class="frow"><span>Циклов в сутки</span><input id="f_cyc" inputmode="numeric"></div>
 <div class="frow"><span>Длительность, с</span><input id="f_dur" inputmode="numeric"></div>
@@ -71,7 +72,7 @@ input{width:100%;border:1px solid #6fcf8f;border-radius:3px;background:#1b3325;c
 // MeGarden PWA (веха M8): «Дома» = прямые /cm с платы, «Удалённо» = MQTT по WSS.
 // Мини-MQTT 3.1.1: QoS0, keepalive 60 с, без внешних библиотек (CDN запрещён ТЗ).
 var T={base:'megarden3',broker:'wss://m9.wqtt.ru:23507'};
-var st={Mode:'Auto',Light:0,Water:'idle',Left:0,Done:0,Cycles:0,Budget:0,Spent:0,Win:'',Next:'',Time:'',Rssi:'',Sig:'',Mq:''};
+var st={Mode:'Auto',Light:0,Water:'idle',Left:0,Done:0,Cycles:0,Budget:0,Spent:0,Win:'',WinWe:'',Next:'',Time:'',Rssi:'',Sig:'',Mq:''};
 var mode=null;                 // 'local' | 'mqtt'
 var ws=null,wsOk=false,pid=1,logArr=[],pathIdx=0,kaT=null,stsT=null,logT=null;
 
@@ -104,7 +105,7 @@ function render(){
     ['Режим',String(st.Mode).toUpperCase()],['Свет',st.Light?'ВКЛ':'выкл'],['Полив',st.Water],
     ['Бюджет',st.Spent+' из '+st.Budget+' с (осталось '+st.Left+')'],
     ['Циклов сегодня',st.Done+' из '+st.Cycles],
-    ['Окно света',st.Win],['Следующее',st.Next],
+    ['Окно света будни',st.Win],['Окно света вых',st.WinWe||st.Win],['Следующее',st.Next],
     ['Wi-Fi',st.Sig!==''?('ок, '+st.Sig+' dBm ('+st.Rssi+'%)'):'—'],
     ['MQTT устройства',st.Mq!==''?st.Mq:'—'],
     ['DS3231',mapRtc(st.Rtc,st.RtcT)]];
@@ -278,22 +279,24 @@ function mqttReconnect(){                             // учётки из на�
   else{openWs();}
   el('setform').style.display='none';
 }
-function fillSet(){                                   // из MgStatus: Win/Cycle/Cycles/Budget
+function fillSet(){                                   // из MgStatus: Win/WinWe/Cycle/Cycles/Budget
   var w=String(st.Win||'').split('-');
-  el('f_on').value=w[0]||'';el('f_off').value=w[1]||'';
+  var we=String(st.WinWe||st.Win||'').split('-');     // старая прошивка без WinWe - как будни
+  el('f_on').value=w[0]||'';el('f_onwe').value=we[0]||'';el('f_off').value=w[1]||'';
   el('f_cyc').value=st.Cycles||0;el('f_dur').value=st.Cycle||0;el('f_bud').value=st.Budget||0;
   el('f_muser').value=localStorage.getItem('mg3user')||'';   // учётки MQTT - в секцию настроек
   el('f_mpass').value=localStorage.getItem('mg3pass')||'';
 }
 function saveSet(){
-  var on=el('f_on').value.trim(),off=el('f_off').value.trim();
+  var on=el('f_on').value.trim(),off=el('f_off').value.trim(),onwe=el('f_onwe').value.trim();
   var t=/^([01]?\d|2[0-3]):[0-5]\d$/;
-  if(!t.test(on)||!t.test(off)){log('ошибка: время должно быть ЧЧ:ММ');return;}
+  if(!t.test(on)||!t.test(off)||(onwe&&!t.test(onwe))){log('ошибка: время должно быть ЧЧ:ММ');return;}
   var cyc=parseInt(el('f_cyc').value,10),dur=parseInt(el('f_dur').value,10),bud=parseInt(el('f_bud').value,10);
   if(isNaN(cyc)||isNaN(dur)||isNaN(bud)||cyc<0||dur<0||bud<0){log('ошибка: числа 0 и больше');return;}
   cmd('MgLightOn',on);cmd('MgLightOff',off);
+  if(onwe)cmd('MgLightOnWe',onwe);                    // пусто = не менять (стык со старой прошивкой)
   cmd('MgCycles',String(cyc));cmd('MgCycle',String(dur));cmd('MgBudget',String(bud));
-  log('настройки отправлены: '+on+'-'+off+', циклов '+cyc+', '+dur+' с, бюджет '+bud+' с');
+  log('настройки отправлены: будни '+on+'-'+off+(onwe?', вых вкл '+onwe:'')+', циклов '+cyc+', '+dur+' с, бюджет '+bud+' с');
   el('setform').style.display='none';
 }
 function doRestart(){
