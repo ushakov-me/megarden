@@ -26,6 +26,7 @@ button.warn{background:#e8734a}
 input{width:100%;border:1px solid #6fcf8f;border-radius:3px;background:#1b3325;color:#e6f2e9;padding:6px;text-align:center;margin:4px 0}
 #log{background:#0a140e;color:#b7e3c4;border-radius:3px;padding:6px;font-size:0.9em;word-break:break-all}
 #log div{margin:2px 0}
+#log div.w{color:#e8734a}
 .net{font-size:0.85em;text-align:center;color:#9fbfa8;margin-top:8px}
 .frow{display:flex;align-items:center;margin:4px 0}
 .frow span{flex:1;text-align:left;color:#9fbfa8}
@@ -77,11 +78,13 @@ var mode=null;                 // 'local' | 'mqtt'
 var ws=null,wsOk=false,pid=1,logArr=[],pathIdx=0,kaT=null,stsT=null,logT=null;
 
 function el(id){return document.getElementById(id);}
+function logLine(x){var i=x.indexOf('] ! ');                // "! " после метки - важное событие (цвет кнопки перезагрузки)
+  return '<div'+(i<0?'':' class="w"')+'>'+(i<0?x:x.slice(0,i)+'] ⚠ '+x.slice(i+4))+'</div>';}
 function log(s){var d=new Date();
   if('['===s.charAt(0)){logArr.unshift(s);}                 // запись устройства: метка [MM-DD HH:MM:SS] уже внутри
   else{logArr.unshift(d.toTimeString().slice(0,8)+' '+s);}
   if(logArr.length>20)logArr.length=20;
-  el('log').innerHTML=logArr.map(function(x){return '<div>'+x+'</div>';}).join('');}
+  el('log').innerHTML=logArr.map(logLine).join('');}
 function applyLog(j){                                       // {"MgLog":[...]} - история журнала устройства, новые первыми
   if(!j||!j.MgLog)return false;
   for(var i=j.MgLog.length-1;i>=0;i--){
@@ -89,7 +92,7 @@ function applyLog(j){                                       // {"MgLog":[...]} -
     if(logArr.indexOf(s)<0){logArr.unshift(s);}             // дедуп по полной строке (30-с опрос шлёт то же)
   }
   if(logArr.length>20)logArr.length=20;
-  el('log').innerHTML=logArr.map(function(x){return '<div>'+x+'</div>';}).join('');
+  el('log').innerHTML=logArr.map(logLine).join('');
   return true;
 }
 
